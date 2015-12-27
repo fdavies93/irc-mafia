@@ -1,5 +1,7 @@
 import math
 import random
+import os
+import platform
 
 class vote:
 	def __init__(self,myManager,callback):
@@ -44,30 +46,79 @@ class person:
 
 _PLAYERS_TO_START_GAME_ = 3
 
+class abstractInterface:
+	def __init__(self):
+		self.hostname = ""
+		self.port = 6667
+		self.nick = "bot"
+	def connect(self):
+		return
+	def sendMessageToAll(self, message):
+		return
+	def sendMessageToPlayer(self, message, player):
+		return
+	def waitForMessage(self):
+		return
+	def parseMessage(self, message):
+		return
+
+class messageData:
+	def __init__(self, message, sender):
+		self.message = message
+		self.sender = sender
+
+class consoleInterface(abstractInterface):
+	def sendMessageToAll(self, message):
+		print message
+
+	def sendMessageToPlayer(self, message, player):
+		print "Please get", player.name, "to come to the keyboard."
+		raw_input("Press Enter when ready.")
+		print message
+		raw_input("Press Enter to clear.")
+		self.clearConsole()
+
+	def waitForMessage(self):
+		messageToReturn = messageData(raw_input(">> "), None)
+		return messageToReturn
+
+	def clearConsole(self):
+		sysName = platform.system()
+		if(sysName == "Windows"):
+			os.system('cls')
+		else:
+			os.system('clear')
+
+class ircInterface(abstractInterface):
+	def sendMessageToAll(self, message):
+		return
+
 class manager:
 	def __init__(self):
 		self.isDay = True
 		self.dayNumber = 0
 		self.isQuit = False #has the game quit?
 		self.people = [] #LIST of people
-
+		self.interface = consoleInterface()
 	def setupGame(self):
-		#Gets input and adds players accordingly
-		ready = False
-		while (ready == False):
-			print "There are currently", len(self.people), "players in the game."
-			if(len(self.people) < _PLAYERS_TO_START_GAME_):
-				print "Too few players to begin game."
-				print "Type your name, or quit to quit."
-			else:
-				print "Type your name, begin to start game, or quit to quit."
-			cur_input = raw_input(">> ")
 
-			if(cur_input == "quit"):
-				self.isQuit = True
+		ready = False
+		#this is the part that could be moved to interface
+		while (ready == False):
+			self.interface.sendMessageToAll("There are currently " + str(len(self.people)) + " players in the game.")
+			if(len(self.people) < _PLAYERS_TO_START_GAME_):
+				self.interface.sendMessageToAll("Too few players to begin game.")
+				self.interface.sendMessageToAll("Type your name, or quit to quit.")
+			else:
+				self.interface.sendMessageToAll("Type your name, or begin to start game.")
+			cur_input = self.interface.waitForMessage().message
+			#############################
+			#make quit not an option
+			if(len(self.people) >= _PLAYERS_TO_START_GAME_ and cur_input == "begin"):
 				ready = True
-			elif(len(self.people) >= _PLAYERS_TO_START_GAME_ and cur_input == "begin"):
-				ready = True
+			#this should be changed so that you need to ask all players' permission
+			#before you start the game
+			#CHANGE WHEN IMPLEMENTING IRC
 			else:
 				personIndex = 0
 				while personIndex < len(self.people):
@@ -79,6 +130,7 @@ class manager:
 					new_person = person(cur_input)
 					self.people.append(new_person)
 					print "Person", new_person.name, "added."
+		########################################################
 
 		#Set up players with correct classes (werewolves / villagers)
 		num_werewolves = round(len(self.people) / 3)
@@ -87,8 +139,12 @@ class manager:
 			if(self.people[choice].type != "Werewolf"):
 				self.people[choice].type = "Werewolf"
 				num_werewolves -= 1
-				print self.people[choice].name, "is now a werewolf!"
+				#print self.people[choice].name, "is now a werewolf!"
 
+		#add code so it tells everyone what they are
+		for player in self.players:
+			self.interface.sendMessageToPlayer("You are a " +player.type+"!",player)
+		self.interface.sendMessageToAll("Prepare to play Werewolf!")
 
 	def startGame(self):
 		self.setupGame()
@@ -96,12 +152,14 @@ class manager:
 			self.gameLoop()
 
 	def gameLoop(self):
-		self.runDay()
-		self.runNight()
-		self.dayNumber += 1
+		if (self.isQuit == False):
+			self.runDay()
+		if (self.isQuit == False):
+			self.runNight()
+			self.dayNumber += 1
 
 	def runDay(self):
-		print "Day has broken!"
+		self.interface.sendMessageToAll("Day has broken!")
 		if(self.dayNumber != 0):
 			#set up and run kill vote
 			killVote = vote(self,self.resolveKillVote)
@@ -109,9 +167,9 @@ class manager:
 				if person.isDead == False:
 					killVote.choices.append(voteOption(person.name))
 					killVote.peopleVoting.append(person.name)
-			print "Time to vote on whom we would like to kill!"
+			self.interface.sendMessageToAll("Time to vote on whom we would like to kill!")
 			killVote.runVote()
-
+			self.testForVictory()
 			#do stuff that you don't do on the first day in Mafia
 			#i.e. execution of suspected mafia / werewolf
 		#else:
@@ -130,6 +188,22 @@ class manager:
 				werewolfVote.choices.append(voteOption(person.name))
 		print "Werewolves, choose your victims!"
 		werewolfVote.runVote()
+		self.testForVictory()
+
+	def testForVictory(self):
+		numWerewolves = 0
+		numVillagers = 0
+		for person in self.people:
+			if(person.type == "Villager" and person.isDead == False):
+				numVillagers += 1
+			elif(person.type == "Werewolf" and person.isDead == False):
+				numWerewolves += 1
+		if(numWerewolves == 0):
+			print "Game over, villagers win!"
+			self.isQuit = True
+		elif(numVillagers == 0):
+			print "Game over, werewolves win!"
+			self.isQuit = True
 
 	# This is dramatic!
 	def resolveKillVote(self,choices):
